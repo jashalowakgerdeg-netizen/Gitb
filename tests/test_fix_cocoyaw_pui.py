@@ -143,6 +143,23 @@ if luaUi.ragebot.auto_hide_shots:get() then fn.auto_osaa(cmd) end
         ):
             self.assertIn(needle, source, f"missing ported system: {needle}")
 
+    def test_tab_comboboxes_do_not_leak_across_tabs(self):
+        # ui_sub / ui_state are standalone controls (not in ITEMS), so they must
+        # be explicitly hidden at the top of refresh_menu or they show on every
+        # tab. This is the exact regression reported.
+        source = (ROOT / "cocoyaw.lua").read_text(encoding="utf-8")
+        start = source.index("function fn.refresh_menu()")
+        head = source[start:start + 400]
+        self.assertIn("fn.vis(ui_sub, false)", head)
+        self.assertIn("fn.vis(ui_state, false)", head)
+
+    def test_icon_tab_bar_present(self):
+        source = (ROOT / "cocoyaw.lua").read_text(encoding="utf-8")
+        self.assertIn("function fn.draw_tab_icons", source)
+        self.assertIn("renderer.load_svg", source)
+        # five icons, one per tab
+        self.assertEqual(source.count("<svg xmlns="), 5)
+
     def test_stays_under_luajit_local_limit(self):
         # LuaJIT caps a function scope at 200 locals; the chunk body is one scope.
         source = (ROOT / "cocoyaw.lua").read_text(encoding="utf-8")

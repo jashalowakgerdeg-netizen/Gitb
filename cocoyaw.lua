@@ -569,6 +569,70 @@ function fn.all_items()
 end
 local ITEMS = fn.all_items()
 
+-- ═══════════════════════════════════════════════════════════════════════════
+--  Icon tab bar - replaces the tab combobox with a clickable strip of icons
+--  drawn beside the gamesense menu. Falls back to the combobox if SVG textures
+--  fail to load. Icons are white-filled so renderer.texture can tint them.
+-- ═══════════════════════════════════════════════════════════════════════════
+local ICON_SVG = {
+    -- Home: house
+    [[<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='#fff' d='M12 3 2 12h3v8h6v-5h2v5h6v-8h3z'/></svg>]],
+    -- Anti-Aims: figure holding a scout aimed down
+    [[<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='9' cy='4' r='2.4' fill='#fff'/><path fill='#fff' d='M7.3 8h3.4l1.3 6h-2l-.6-3.2-.6 3.2H6z'/><path fill='#fff' d='M12.2 8.6 20 18.4l-1.6 1.3-7.8-9.8z'/><rect x='18.4' y='17.6' width='3.2' height='1.8' transform='rotate(51 20 18.5)' fill='#fff'/></svg>]],
+    -- Ragebot: target reticle
+    [[<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='8' fill='none' stroke='#fff' stroke-width='2'/><circle cx='12' cy='12' r='2.2' fill='#fff'/><path stroke='#fff' stroke-width='2' d='M12 1v4M12 19v4M1 12h4M19 12h4'/></svg>]],
+    -- Utils: sliders
+    [[<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='#fff' d='M3 6h11v2H3zM16 5h5v4h-5zM3 11h5v2H3zM10 10h11v4H10zM3 16h11v2H3zM16 15h5v4h-5z'/></svg>]],
+    -- Visuals: eye
+    [[<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='#fff' d='M12 5C5.5 5 1.5 12 1.5 12S5.5 19 12 19s10.5-7 10.5-7S18.5 5 12 5zm0 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8z'/><circle cx='12' cy='12' r='2' fill='#fff'/></svg>]],
+}
+local ICONS = {ok = false, tried = false, tex = {}, prev_down = false}
+
+function fn.ensure_icons()
+    if ICONS.tried then return end
+    ICONS.tried = true
+    local ok = true
+    for i = 1, #ICON_SVG do
+        local tex
+        pcall(function() tex = renderer.load_svg(ICON_SVG[i], 28, 28) end)
+        ICONS.tex[i] = tex
+        if not tex then ok = false end
+    end
+    ICONS.ok = ok
+    if ok then fn.vis(ui_tab, false); fn.refresh_menu() end
+end
+
+function fn.draw_tab_icons()
+    fn.ensure_icons()
+    if not ICONS.ok then return end
+    local mx, my = ui.menu_position()
+    local mw = select(1, ui.menu_size())
+    if not mx then return end
+    local x = mx - 46
+    if x < 6 then x = mx + (mw or 0) + 10 end
+    local y0 = my + 10
+    local mpx, mpy = ui.mouse_position()
+    local down = client.key_state(0x01) == true
+    local click = down and not ICONS.prev_down
+    ICONS.prev_down = down
+    local cur = fn.get(ui_tab, "Home")
+    for i = 1, #tabs do
+        local tab = tabs[i]
+        local y = y0 + (i - 1) * 40
+        local active = cur == tab
+        local hover = mpx and mpx >= x - 6 and mpx <= x + 34 and mpy and mpy >= y - 6 and mpy <= y + 34
+        renderer.rectangle(x - 6, y - 6, 42, 40, 18, 18, 22, active and 240 or 170)
+        if active then renderer.rectangle(x - 6, y - 6, 3, 40, 250, 200, 140, 255) end
+        if hover and not active then renderer.rectangle(x - 6, y - 6, 42, 40, 255, 255, 255, 22) end
+        local tex = ICONS.tex[i]
+        if tex then
+            local br = active and 250 or (hover and 210 or 150)
+            renderer.texture(tex, x, y, 28, 28, br, active and 200 or br, active and 140 or br, 255)
+        end
+        if hover and click then fn.set(ui_tab, tab); fn.refresh_menu() end
+    end
+end
+
 function fn.menu_hide_builtin(value)
     fn.vis(ref.AA.enabled, value); fn.vis(ref.AA.yawbase, value); fn.vis(ref.AA.fsbodyyaw, value)
     fn.vis(ref.AA.edgeyaw, value); fn.vis(ref.AA.roll, value)
@@ -583,7 +647,11 @@ end
 
 function fn.refresh_menu()
     for i = 1, #ITEMS do fn.vis(ITEMS[i], false) end
-    fn.vis(ui_tab, true)
+    -- ui_sub/ui_state are standalone controls, not part of ITEMS, so hide them
+    -- here or they leak into every tab; the tab combobox hides once icons load
+    fn.vis(ui_tab, not ICONS.ok)
+    fn.vis(ui_sub, false)
+    fn.vis(ui_state, false)
     local tab = fn.get(ui_tab, "Home")
 
     if tab == "Home" then
@@ -2585,7 +2653,10 @@ client.set_event_callback("paint", function()
 end)
 
 client.set_event_callback("paint_ui", function()
-    if ui.is_menu_open() then fn.menu_hide_builtin(false) end
+    if ui.is_menu_open() then
+        fn.menu_hide_builtin(false)
+        fn.draw_tab_icons()
+    end
 end)
 
 client.set_event_callback("aim_fire", function(s)
