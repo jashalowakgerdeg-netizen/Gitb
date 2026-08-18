@@ -496,8 +496,9 @@ m.rage = {
     dt_auto = fn.ck("CY Auto DT Mode"),
     dt_auto_deadband = fn.sl("CY DT Switch Deadband", 4, 40, 12),
     dthc = fn.ck("CY Adaptive DT Hitchance"),
-    dthc_off = fn.sl("CY DT HC Offensive", 0, 100, 30, true, "%"),
-    dthc_def = fn.sl("CY DT HC Defensive", 0, 100, 55, true, "%"),
+    dthc_bias = fn.sl("CY DT Aggression", -25, 25, 0, true, "%"),
+    dthc_floor = fn.sl("CY DT HC Floor", 0, 100, 15, true, "%"),
+    dthc_ceil = fn.sl("CY DT HC Ceiling", 0, 100, 95, true, "%"),
     dthc_uncharged = fn.sl("CY DT Uncharged Penalty", 0, 100, 40, true, "%"),
     dthc_learn = fn.ck("CY DT Outcome Learning"),
     dt_recharge = fn.ck("CY Better DT Recharge"),
@@ -692,7 +693,7 @@ function fn.refresh_menu()
         fn.vis(r.spread, true)
         fn.vis(r.spread_strength, fn.get(r.spread))
         fn.vis(r.dt_auto_deadband, fn.get(r.dt_auto))
-        fn.vis(r.dthc_off, fn.get(r.dthc)); fn.vis(r.dthc_def, fn.get(r.dthc))
+        fn.vis(r.dthc_bias, fn.get(r.dthc)); fn.vis(r.dthc_floor, fn.get(r.dthc)); fn.vis(r.dthc_ceil, fn.get(r.dthc))
         fn.vis(r.dthc_uncharged, fn.get(r.dthc)); fn.vis(r.dthc_learn, fn.get(r.dthc))
         fn.vis(r.scout_hc, fn.get(r.jump_scout)); fn.vis(r.jump_hc, fn.get(r.jump_scout))
         fn.vis(r.auto_hs_wep, fn.get(r.auto_hs)); fn.vis(r.auto_hs_state, fn.get(r.auto_hs))
@@ -2017,7 +2018,14 @@ end
 function fn.adaptive_dthc(me, w, prof, dist, self_air)
     if not ref.dthc or not fn.get(m.rage.dthc) then return end
     if not (ref.doubletap[1] and fn.get(ref.doubletap[1])) or not (ref.doubletap[2] and fn.hotkey_active(ref.doubletap[2])) then return end
-    local base = mg.indefensive and fn.get(m.rage.dthc_def, 55) or fn.get(m.rage.dthc_off, 30)
+    -- per-weapon baseline: what a double tap is worth is a property of the gun,
+    -- not one number reused everywhere. An AWP DT that misses costs the round; an
+    -- SMG DT costs two bullets; a Zeus one costs nothing. Switching weapons
+    -- re-resolves the gate on its own.
+    local base = prof.dt_base or 44
+    -- defensive fires out of a deliberately spent tickbase, so the shift is
+    -- shallower and the roll has to be better to make up for it
+    if mg.indefensive then base = base + 12 end
     if not fn.dt_charged() then base = base + fn.get(m.rage.dthc_uncharged, 40) end
     if not fn.tb_charged() then base = base + m_min(fn.tb_depth(), 14) * 2.5 end
     if fn.dt_shift() > -3 then base = base + 10 end
@@ -2043,7 +2051,14 @@ function fn.adaptive_dthc(me, w, prof, dist, self_air)
         if pd and pd.tele then base = base + 10 end
     else base = base + 10 end
     if fn.get(m.rage.dthc_learn) then local t = HS.dt_learn[w]; if t then base = base + t.bias end end
-    HS.req.dthc = fn.clamp(m_floor(base), 0, 100)
+    -- one aggression knob leans the resolved value: negative takes more shots at
+    -- a worse roll, positive holds out for a better one
+    base = base + fn.get(m.rage.dthc_bias, 0)
+    -- the user's floor/ceiling bound everything above, so the adaptive model can
+    -- never talk the gate below what they will take or above what stops it firing
+    local floor_, ceil_ = fn.get(m.rage.dthc_floor, 15), fn.get(m.rage.dthc_ceil, 95)
+    if ceil_ < floor_ then ceil_ = floor_ end
+    HS.req.dthc = fn.clamp(m_floor(base), floor_, ceil_)
 end
 
 function fn.dt_auto()

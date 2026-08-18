@@ -171,6 +171,23 @@ if luaUi.ragebot.auto_hide_shots:get() then fn.auto_osaa(cmd) end
         self.assertIn("PZ.LEAN_YAW", flash)
         self.assertIn("PZ.BODY_PITCH", flash)
 
+    def test_adaptive_dt_is_per_weapon(self):
+        # adaptive DT must baseline on the per-weapon dt_base rather than a single
+        # global slider, and stay gated by the on/off checkbox.
+        source = (ROOT / "cocoyaw.lua").read_text(encoding="utf-8")
+        dthc = source[source.index("function fn.adaptive_dthc"):]
+        dthc = dthc[:dthc.index("function fn.dt_auto")]
+        self.assertIn("local base = prof.dt_base or 44", dthc)
+        self.assertIn("fn.get(m.rage.dthc)", dthc)  # on/off gate
+        self.assertIn("m.rage.dthc_bias", dthc)
+        self.assertIn("m.rage.dthc_floor", dthc)
+        self.assertIn("m.rage.dthc_ceil", dthc)
+        self.assertNotIn("dthc_off", source)
+        self.assertNotIn("dthc_def", source)
+        # every weapon profile carries a dt_base
+        profile = source[source.index("PROFILE = {"):source.index("SCOPED = {")]
+        self.assertEqual(profile.count("dt_base ="), 12)
+
     def test_fake_flash_server_side_body_yaw(self):
         # the genuinely server-authoritative lever: on the fake packet the body
         # yaw is driven to the engine ceiling on the desync side.
