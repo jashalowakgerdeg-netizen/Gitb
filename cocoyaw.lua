@@ -351,15 +351,15 @@ function fn.hk(name, inline) return ui.new_hotkey(TAB, CONT, name, inline) end
 function fn.bt(name, fn) return ui.new_button(TAB, CONT, name, fn) end
 function fn.lb(name) return ui.new_label(TAB, CONT, name) end
 
-local ui_tab = fn.cb("\vCocoYaw", tabs)
-local ui_sub = fn.cb("\nAA Page", "Builder", "Misc")
+local ui_tab = fn.cb("CocoYaw", tabs)
+local ui_sub = fn.cb("AA Page", "Builder", "Misc")
 local ui_state = fn.cb("State", conditions)
 
 local m = {}
 
 -- Home
 m.home = {
-    title = fn.lb("\bFAC88CFF CocoYaw \b8CB1D9FFv" .. version),
+    title = fn.lb("CocoYaw v" .. version),
     subtitle = fn.lb("reading over inference"),
 }
 
@@ -602,32 +602,45 @@ function fn.ensure_icons()
     if ok then fn.vis(ui_tab, false); fn.refresh_menu() end
 end
 
+local ICON_STEP, ICON_CELL, ICON_SIZE = 46, 40, 26
 function fn.draw_tab_icons()
     fn.ensure_icons()
     if not ICONS.ok then return end
     local mx, my = ui.menu_position()
-    local mw = select(1, ui.menu_size())
+    local mw, mh = ui.menu_size()
     if not mx then return end
-    local x = mx - 46
-    if x < 6 then x = mx + (mw or 0) + 10 end
-    local y0 = my + 10
+    local count = #tabs
+    local total = count * ICON_STEP
+    local sw = select(1, client.screen_size())
+    -- dock to the left of the menu; if the menu hugs the screen edge, dock right
+    local x = mx - (ICON_CELL + 12)
+    if x < 4 then x = mx + (mw or 0) + 12 end
+    if x + ICON_CELL > sw - 2 then x = sw - ICON_CELL - 2 end
+    local y0 = my + m_max(12, ((mh or total) - total) * 0.5)
+    -- one background panel so the strip reads as a single dock, not loose icons
+    renderer.rectangle(x - 6, y0 - 10, ICON_CELL + 12, total + 8, 16, 16, 20, 240)
+    renderer.rectangle(x - 6, y0 - 10, ICON_CELL + 12, 2, 250, 200, 140, 90)
     local mpx, mpy = ui.mouse_position()
     local down = client.key_state(0x01) == true
     local click = down and not ICONS.prev_down
     ICONS.prev_down = down
     local cur = fn.get(ui_tab, "Home")
-    for i = 1, #tabs do
+    local pad = (ICON_CELL - ICON_SIZE) * 0.5
+    for i = 1, count do
         local tab = tabs[i]
-        local y = y0 + (i - 1) * 40
+        local cy = y0 + (i - 1) * ICON_STEP
         local active = cur == tab
-        local hover = mpx and mpx >= x - 6 and mpx <= x + 34 and mpy and mpy >= y - 6 and mpy <= y + 34
-        renderer.rectangle(x - 6, y - 6, 42, 40, 18, 18, 22, active and 240 or 170)
-        if active then renderer.rectangle(x - 6, y - 6, 3, 40, 250, 200, 140, 255) end
-        if hover and not active then renderer.rectangle(x - 6, y - 6, 42, 40, 255, 255, 255, 22) end
+        local hover = mpx and mpx >= x - 4 and mpx <= x + ICON_CELL and mpy and mpy >= cy - 4 and mpy <= cy + ICON_CELL
+        if active then
+            renderer.rectangle(x - 4, cy - 4, ICON_CELL + 8, ICON_CELL + 4, 34, 30, 26, 255)
+            renderer.rectangle(x - 6, cy - 4, 3, ICON_CELL + 4, 250, 200, 140, 255)
+        elseif hover then
+            renderer.rectangle(x - 4, cy - 4, ICON_CELL + 8, ICON_CELL + 4, 255, 255, 255, 20)
+        end
         local tex = ICONS.tex[i]
         if tex then
-            local br = active and 250 or (hover and 210 or 150)
-            renderer.texture(tex, x, y, 28, 28, br, active and 200 or br, active and 140 or br, 255)
+            local br = active and 250 or (hover and 220 or 150)
+            renderer.texture(tex, x + pad, cy + pad, ICON_SIZE, ICON_SIZE, br, active and 200 or br, active and 140 or br, 255)
         end
         if hover and click then fn.set(ui_tab, tab); fn.refresh_menu() end
     end
