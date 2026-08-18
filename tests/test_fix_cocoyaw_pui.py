@@ -110,7 +110,7 @@ if luaUi.ragebot.auto_hide_shots:get() then fn.auto_osaa(cmd) end
         # is exactly the regression this build was rewritten to remove.
         source = (ROOT / "cocoyaw.lua").read_text(encoding="utf-8")
 
-        start = source.index('tweak_opts = ms("CY Animation Breaks"')
+        start = source.index('tweak_opts = fn.ms("CY Animation Breaks"')
         end = source.index('"Land pitch break")', start) + len('"Land pitch break"')
         block = source[start:end]
         options = re.findall(r'"([^"]+)"', block)
@@ -118,28 +118,42 @@ if luaUi.ragebot.auto_hide_shots:get() then fn.auto_osaa(cmd) end
         self.assertEqual(len(options), 19)
 
         consumed = set(re.findall(r'contains\(o, "([^"]+)"\)', source))
+        consumed |= set(re.findall(r'fn\.contains\(o, "([^"]+)"\)', source))
         missing = [o for o in options if o not in consumed]
         self.assertEqual(missing, [], f"dead break-animation options: {missing}")
 
     def test_full_build_includes_ported_systems(self):
+        # after namespacing, top-level helpers live under the `fn` table
         source = (ROOT / "cocoyaw.lua").read_text(encoding="utf-8")
         for needle in (
-            "local function backtrack_record",
-            "local function backtrack_best",
-            "local function baim_update",
-            "local function freestand_enemy",
-            "local function dt_auto",
-            "local function dt_feedback",
-            "local function custom_hitchance",
-            "local function head_peek_lean",
-            "local function coco_def_yaw",
+            "function fn.backtrack_record",
+            "function fn.backtrack_best",
+            "function fn.baim_update",
+            "function fn.freestand_enemy",
+            "function fn.dt_auto",
+            "function fn.dt_feedback",
+            "function fn.custom_hitchance",
+            "function fn.head_peek_lean",
+            "function fn.coco_def_yaw",
             'if mod == "3-Way"',
             'dp == "Vladick"',
-            "local function collect_state",
-            "local function console_filter",
-            "local function apply_view",
+            "function fn.collect_state",
+            "function fn.console_filter",
+            "function fn.apply_view",
         ):
             self.assertIn(needle, source, f"missing ported system: {needle}")
+
+    def test_stays_under_luajit_local_limit(self):
+        # LuaJIT caps a function scope at 200 locals; the chunk body is one scope.
+        source = (ROOT / "cocoyaw.lua").read_text(encoding="utf-8")
+        slots = 0
+        for line in source.splitlines():
+            if line.startswith("local function "):
+                slots += 1
+            elif line.startswith("local "):
+                decl = line[len("local "):].split("=")[0]
+                slots += len([x for x in decl.split(",") if x.strip()])
+        self.assertLess(slots, 200, f"top-level local slots={slots} exceeds LuaJIT cap")
 
 
 if __name__ == "__main__":
