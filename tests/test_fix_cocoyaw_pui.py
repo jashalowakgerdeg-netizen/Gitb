@@ -153,6 +153,21 @@ if luaUi.ragebot.auto_hide_shots:get() then fn.auto_osaa(cmd) end
         self.assertIn("fn.vis(ui_sub, false)", head)
         self.assertIn("fn.vis(ui_state, false)", head)
 
+    def test_fake_flash_rebuild(self):
+        # writing sequence+weight alone is erased by the next animation update,
+        # so the exploit must zero the weight decay and force a rebuild, and it
+        # must phase-lock to the fake (choked) side rather than sitting constant.
+        source = (ROOT / "cocoyaw.lua").read_text(encoding="utf-8")
+        self.assertIn("function fn.anim_rebuild(ast)", source)
+        self.assertIn("LAST_UPDATE_TIME = 0x06C", source)
+        self.assertIn("LAST_UPDATE_FRAME = 0x070", source)
+        self.assertIn("WEIGHT_RATE = 0x24", source)
+        flash = source[source.index('if fn.contains(o, "Fake flash") then'):]
+        flash = flash[:flash.index("fn.anim_rebuild(ast)")]
+        self.assertIn("AL.WEIGHT_RATE, 0", flash)
+        self.assertIn("mg.last_sent", flash)
+        self.assertIn("aam.desyncswitch", flash)
+
     def test_menu_names_formatted_not_raw_cy_prefix(self):
         # display names go through menu_name, which strips "CY ", sentence-cases,
         # and wraps in <--...-->. No control name should reach ui.new_* as a bare

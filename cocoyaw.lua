@@ -146,13 +146,15 @@ ffi.cdef[[
 
 local STATE_OFF, LAYER_OFF = 0x9960, 0x2990
 local AS = {
+    LAST_UPDATE_TIME = 0x06C, LAST_UPDATE_FRAME = 0x070,
     EYE_YAW = 0x078, PITCH = 0x07C, GOAL_FEET = 0x080, CUR_FEET = 0x084,
     LEAN_AMT = 0x090, DUCK_AMT = 0x0A4, SPEED_2D = 0x0EC,
     FEET_SPD_A = 0x0F8, FEET_SPD_B = 0x0FC,
     ON_GROUND = 0x108, HIT_GROUND = 0x109, HEAD_HEIGHT = 0x118, STOP_FULL = 0x11C,
     MAX_YAW = 0x334,
 }
-local AL = {STRIDE = 0x38, SEQUENCE = 0x18, PREV_CYCLE = 0x1C, WEIGHT = 0x20, PLAYBACK = 0x28, CYCLE = 0x2C}
+local AL = {STRIDE = 0x38, SEQUENCE = 0x18, PREV_CYCLE = 0x1C, WEIGHT = 0x20,
+            WEIGHT_RATE = 0x24, PLAYBACK = 0x28, CYCLE = 0x2C}
 local TY = {
     f = ffi.typeof("float*"), b = ffi.typeof("bool*"), u = ffi.typeof("uint32_t*"),
     c = ffi.typeof("char*"), cc = ffi.typeof("char**"), vt = ffi.typeof("void***"),
@@ -164,6 +166,22 @@ function fn.ALF(base, off) return cast(TY.f, base + off)[0] end
 function fn.ALFS(base, off, v) cast(TY.f, base + off)[0] = v end
 function fn.ALI(base, off) return cast(TY.u, base + off)[0] end
 function fn.ALIS(base, off, v) cast(TY.u, base + off)[0] = v end
+function fn.ASFS(base, off, v) cast(TY.f, base + off)[0] = v end
+function fn.ASIS(base, off, v) cast(TY.u, base + off)[0] = v end
+
+-- Force the animation system to re-evaluate this frame.
+--
+-- CCSGOPlayerAnimState skips its update when the stored time/framecount already
+-- match the current frame, which is what silently discarded overlay writes: the
+-- layer was set and then the next update overwrote it. Clearing both stamps
+-- makes the rebuild run again with our layer still in place.
+function fn.anim_rebuild(ast)
+    if ast == nil then return false end
+    return pcall(function()
+        fn.ASFS(ast, AS.LAST_UPDATE_TIME, 0)
+        fn.ASIS(ast, AS.LAST_UPDATE_FRAME, 0)
+    end)
+end
 
 local entlist
 for _, dll in ipairs({"client_panorama.dll", "client.dll"}) do
@@ -915,7 +933,7 @@ local mg = {
     exploit = "", declaredloc = vector(), currentloc = vector(), declaredyaw = 0, fakeyaw = 0,
     shottimer = 0, shotbool = false, jumpscout = false, autopeekfix = 0, airtime = 0, groundtimer = 0,
     threat = -1, fsside = nil, fsyaw = nil, atyaw = nil, hittable_any = false,
-    indefensive = false, ext_fired = false, lc_broken = false, head_peek = 0,
+    indefensive = false, ext_fired = false, lc_broken = false, head_peek = 0, last_sent = true,
     tb = {cmd = nil, max = nil, diff = nil, depth = 0}, own_desync = 0, own_max = 58, fl_phase = 0,
     fs = {
         left = {t1 = {startpos = vector(), endpos = vector(), fraction = 1, hit = -1}, t2 = {startpos = vector(), endpos = vector(), fraction = 1, hit = -1}},
@@ -2211,7 +2229,42 @@ function fn.break_anims()
     if fn.contains(o, "Air walk") and speed > 1.5 then local l6 = fn.layerbase(me, 6); if l6 then pcall(fn.ALFS, l6, AL.WEIGHT, 1) end end
     if fn.contains(o, "Earthquake") then local l12 = fn.layerbase(me, 12); if l12 then pcall(fn.ALFS, l12, AL.WEIGHT, client.random_float(0, 1)) end end
     if fn.contains(o, "Fake walk") then local l12, l6 = fn.layerbase(me, 12), fn.layerbase(me, 6); if l12 then pcall(fn.ALFS, l12, AL.WEIGHT, 0) end; if l6 then pcall(fn.ALFS, l6, AL.WEIGHT, 0) end end
-    if fn.contains(o, "Fake flash") then local l9 = fn.layerbase(me, 9); if l9 then pcall(fn.ALIS, l9, AL.SEQUENCE, 224); pcall(fn.ALFS, l9, AL.WEIGHT, 1) end end
+    -- Fake flash rebuild.
+    --
+    -- Overlay 9 is ANIMATION_LAYER_FLASHED. Writing sequence and weight alone
+    -- was pointless: the next animation update overwrote both, so the layer was
+    -- only ever set for the tail of a frame. The weight delta rate is zeroed so
+    -- the weight stops decaying back, the playback rate is pinned so the pose is
+    -- held instead of playing out, and the whole thing is followed by a forced
+    -- rebuild so the write survives the update that used to erase it.
+    --
+    -- The cycle is phase-locked to the desync side rather than being constant.
+    -- A resolver that samples the overlays (3 adjust, 6 move, 9 flashed, 12 lean)
+    -- then reads a body that disagrees with the goal feet yaw the server is
+    -- actually holding, and it flips with the fake side instead of sitting still.
+    if fn.contains(o, "Fake flash") then
+        local l9 = fn.layerbase(me, 9)
+        if l9 then
+            local side = (mg.head_peek ~= 0 and mg.head_peek) or (aam.desyncswitch and 1 or -1)
+            -- only carry the break on choked commands; the sent packet keeps a
+            -- clean layer so our own real angle is never animated against
+            local w = mg.last_sent and 0 or 1
+            pcall(fn.ALIS, l9, AL.SEQUENCE, 224)
+            pcall(fn.ALFS, l9, AL.WEIGHT, w)
+            pcall(fn.ALFS, l9, AL.WEIGHT_RATE, 0)
+            pcall(fn.ALFS, l9, AL.PLAYBACK, 0)
+            local cyc = side > 0 and 0.0 or 0.5
+            pcall(fn.ALFS, l9, AL.CYCLE, cyc)
+            pcall(fn.ALFS, l9, AL.PREV_CYCLE, cyc)
+            if w > 0 then
+                -- the adjust layer is what ties the upper body to the aim matrix;
+                -- collapsing it while flashed is what makes the break hold
+                local l3 = fn.layerbase(me, 3)
+                if l3 then pcall(fn.ALFS, l3, AL.WEIGHT, 0); pcall(fn.ALFS, l3, AL.WEIGHT_RATE, 0) end
+            end
+            fn.anim_rebuild(ast)
+        end
+    end
     if fn.contains(o, "Moonwalk") then sp(me, "m_flPoseParameter", 0, PZ.MOVE_YAW) end
     if fn.contains(o, "Smoothing") then sp(me, "m_flPoseParameter", 0, PZ.LEAN_YAW) end
     if fn.contains(o, "Fallen legs") then sp(me, "m_flPoseParameter", 1, PZ.JUMP_FALL) end
@@ -2590,6 +2643,8 @@ client.set_event_callback("setup_command", function(cmd)
 
     fn.run_direction()
     fn.setup_aa(cmd)
+    -- captured after the AA pass, which is where fake lag decides the packet
+    mg.last_sent = cmd.allow_send_packet == true
     fn.auto_hideshots(cmd)
     fn.hideshot_fix()
     fn.fix_autopeek(cmd)
