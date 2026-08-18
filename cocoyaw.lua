@@ -781,6 +781,10 @@ m.cfg_buttons = {
     fn.bt("CY Delete", fn.cfg_delete), fn.bt("CY Export", fn.cfg_export), fn.bt("CY Import", fn.cfg_import),
 }
 
+-- the config buttons are created after the first snapshot, so rebuild ITEMS to
+-- include them; otherwise they are never hidden and leak onto every tab
+ITEMS = fn.all_items()
+
 for _, item in ipairs(ITEMS) do pcall(ui.set_callback, item, fn.refresh_menu) end
 for _, item in ipairs({ui_tab, ui_sub, ui_state}) do pcall(ui.set_callback, item, fn.refresh_menu) end
 fn.refresh_menu()

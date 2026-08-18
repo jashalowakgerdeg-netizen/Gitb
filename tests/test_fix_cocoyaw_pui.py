@@ -153,6 +153,16 @@ if luaUi.ragebot.auto_hide_shots:get() then fn.auto_osaa(cmd) end
         self.assertIn("fn.vis(ui_sub, false)", head)
         self.assertIn("fn.vis(ui_state, false)", head)
 
+    def test_config_buttons_included_in_items_snapshot(self):
+        # config buttons are created after the first ITEMS snapshot; ITEMS must be
+        # rebuilt afterwards or they never get hidden and leak onto every tab.
+        source = (ROOT / "cocoyaw.lua").read_text(encoding="utf-8")
+        buttons_at = source.index("m.cfg_buttons = {")
+        rebuild_at = source.index("ITEMS = fn.all_items()", buttons_at)
+        callback_at = source.index("ipairs(ITEMS) do pcall(ui.set_callback", buttons_at)
+        self.assertLess(buttons_at, rebuild_at)
+        self.assertLess(rebuild_at, callback_at)
+
     def test_no_unsafe_floating_tab_overlay(self):
         # a floating overlay drawn outside the menu leaks onto every gamesense
         # tab and can pass clicks through to the game (accidental fire). Tab
