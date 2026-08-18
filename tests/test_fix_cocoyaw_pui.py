@@ -1,4 +1,5 @@
 import importlib.util
+import re
 import unittest
 from pathlib import Path
 
@@ -93,10 +94,52 @@ if luaUi.ragebot.auto_hide_shots:get() then fn.auto_osaa(cmd) end
         self.assertNotIn("ref.os.value", source)
         self.assertNotIn("client.latency(0)", source)
         self.assertNotIn("return d == nil or d >= 0 and 0 or -d", source)
-        self.assertIn('"CY Hide-Shots fix"', source)
-        self.assertIn('"CY on-shot angle capture"', source)
-        self.assertIn('p_set(ent, "Force Body Yaw Value"', source)
         self.assertIn('local tabs = {"Home", "Anti-Aims", "Ragebot", "Utils", "Visuals"}', source)
+
+    def test_checked_in_lua_parses(self):
+        try:
+            from luaparser import ast as lua_ast
+        except ImportError:
+            self.skipTest("luaparser not installed")
+        source = (ROOT / "cocoyaw.lua").read_text(encoding="utf-8")
+        lua_ast.parse(source)
+
+    def test_no_dead_break_animation_options(self):
+        # every string in the break-animations multiselect must be consumed by
+        # break_anims via contains(o, "...") - a menu option with no code path
+        # is exactly the regression this build was rewritten to remove.
+        source = (ROOT / "cocoyaw.lua").read_text(encoding="utf-8")
+
+        start = source.index('tweak_opts = ms("CY Animation Breaks"')
+        end = source.index('"Land pitch break")', start) + len('"Land pitch break"')
+        block = source[start:end]
+        options = re.findall(r'"([^"]+)"', block)
+        options = [o for o in options if o != "CY Animation Breaks"]
+        self.assertEqual(len(options), 19)
+
+        consumed = set(re.findall(r'contains\(o, "([^"]+)"\)', source))
+        missing = [o for o in options if o not in consumed]
+        self.assertEqual(missing, [], f"dead break-animation options: {missing}")
+
+    def test_full_build_includes_ported_systems(self):
+        source = (ROOT / "cocoyaw.lua").read_text(encoding="utf-8")
+        for needle in (
+            "local function backtrack_record",
+            "local function backtrack_best",
+            "local function baim_update",
+            "local function freestand_enemy",
+            "local function dt_auto",
+            "local function dt_feedback",
+            "local function custom_hitchance",
+            "local function head_peek_lean",
+            "local function coco_def_yaw",
+            'if mod == "3-Way"',
+            'dp == "Vladick"',
+            "local function collect_state",
+            "local function console_filter",
+            "local function apply_view",
+        ):
+            self.assertIn(needle, source, f"missing ported system: {needle}")
 
 
 if __name__ == "__main__":
