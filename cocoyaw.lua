@@ -473,7 +473,7 @@ m.rage = {
     hs = fn.ck("CY Adaptive Hitscale"),
     hs_dmg = fn.ck("CY Adaptive Lethal Damage"),
     spread = fn.ck("CY Spread Guard"),
-    spread_strength = fn.sl("CY Spread Guard Strength", 0, 150, 100, true, "%"),
+    spread_strength = fn.sl("CY Spread Guard Strength", 0, 200, 100, true, "%"),
     dt_auto = fn.ck("CY Auto DT Mode"),
     dt_auto_deadband = fn.sl("CY DT Switch Deadband", 4, 40, 12),
     dthc = fn.ck("CY Adaptive DT Hitchance"),
@@ -667,8 +667,10 @@ function fn.refresh_menu()
         for _, v in pairs(r) do fn.vis(v, true) end
         fn.vis(r.onshot, fn.get(r.resolver)); fn.vis(r.maxdes, fn.get(r.resolver))
         fn.vis(r.pgate, fn.get(r.resolver)); fn.vis(r.pose, fn.get(r.resolver))
-        fn.vis(r.hs_dmg, fn.get(r.hs)); fn.vis(r.spread, fn.get(r.hs))
-        fn.vis(r.spread_strength, fn.get(r.hs) and fn.get(r.spread))
+        fn.vis(r.hs_dmg, fn.get(r.hs))
+        -- the spread guard is a safety floor, independent of adaptive hitscale
+        fn.vis(r.spread, true)
+        fn.vis(r.spread_strength, fn.get(r.spread))
         fn.vis(r.dt_auto_deadband, fn.get(r.dt_auto))
         fn.vis(r.dthc_off, fn.get(r.dthc)); fn.vis(r.dthc_def, fn.get(r.dthc))
         fn.vis(r.dthc_uncharged, fn.get(r.dthc)); fn.vis(r.dthc_learn, fn.get(r.dthc))
@@ -1820,7 +1822,7 @@ local HS = {
     bk_mp = {}, bk_hc = {}, bk_dmg = {}, bk_dthc = {}, last = {}, dt_learn = {},
     cur_wtype = "Global", was_hs = false, was_dthc = false,
     dt_mode = "Offensive", dt_score = 0, dt_mode_t = 0,
-    req = {mp = nil, hc = nil, hc_prio = -1, hc_pen = 0, dmg = nil, dthc = nil},
+    req = {mp = nil, hc = nil, hc_prio = -1, hc_pen = 0, hc_floor = 0, dmg = nil, dthc = nil},
 }
 local WTYPE_CLASS = {
     CWeaponAWP = "AWP", CWeaponSSG08 = "SSG 08", CWeaponSCAR20 = "G3SG1 / SCAR-20", CWeaponG3SG1 = "G3SG1 / SCAR-20",
@@ -1841,7 +1843,10 @@ end
 
 function fn.hc_request(v, prio) if v == nil then return end; if prio > HS.req.hc_prio then HS.req.hc = v; HS.req.hc_prio = prio end end
 function fn.hc_penalty(v) if v > HS.req.hc_pen then HS.req.hc_pen = v end end
-function fn.rage_reset() local r = HS.req; r.mp, r.hc, r.hc_prio, r.hc_pen, r.dmg, r.dthc = nil, nil, -1, 0, nil, nil end
+function fn.rage_reset()
+    local r = HS.req
+    r.mp, r.hc, r.hc_prio, r.hc_pen, r.hc_floor, r.dmg, r.dthc = nil, nil, -1, 0, 0, nil, nil
+end
 function fn.rage_invalidate() HS.last = {} end
 function fn.rage_dirty(r, w, v)
     local t = HS.last[r]; if not t then t = {}; HS.last[r] = t end
@@ -1855,7 +1860,13 @@ end
 function fn.rage_flush()
     if not ref.wtype then return end
     local w, r = HS.cur_wtype, HS.req
-    local hc = r.hc and fn.clamp(m_floor(r.hc + r.hc_pen), 0, 100) or nil
+    local hc = r.hc
+    -- the spread floor lifts whatever the gate would otherwise be, including the
+    -- user's own slider when adaptive hitscale is switched off
+    if r.hc_floor and r.hc_floor > 0 then
+        hc = m_max(hc or HS.bk_hc[w] or fn.get(ref.hitchance) or 0, r.hc_floor)
+    end
+    if hc ~= nil then hc = fn.clamp(m_floor(hc + r.hc_pen), 0, 100) end
     local d_mp = r.mp ~= nil and fn.rage_dirty(ref.mpscale, w, r.mp)
     local d_hc = hc ~= nil and fn.rage_dirty(ref.hitchance, w, hc)
     local d_dmg = r.dmg ~= nil and fn.rage_dirty(ref.mindmg, w, r.dmg)
@@ -1882,12 +1893,20 @@ function fn.rage_restore_all()
     fn.rage_invalidate()
 end
 
+-- Minimum hit chance the shot must clear before dispersion makes it a coin flip.
+--
+-- The old curve topped out around 54 for a scout even at max strength, so it
+-- never bound against the 52-62 the adaptive path was writing and every spread
+-- miss went out unchallenged. Base raised, the lethal discount cut from 0.75 to
+-- 0.93 (it applied to every one-shot weapon permanently, gutting the floor on
+-- exactly the guns that need it), and the ceiling raised to 95.
 function fn.spread_floor(dist, speed, air, sf, lethal)
     if not fn.get(m.rage.spread, true) then return 0 end
-    local f = (36 + fn.clamp(dist / 3000, 0, 1) * 38 + fn.clamp(speed / 250, 0, 1) * 22) * (0.80 + sf * 0.60)
-    if air then f = f + 18 end
-    if lethal then f = f * 0.75 end
-    return fn.clamp(f * fn.get(m.rage.spread_strength, 100) * 0.01, 0, 88)
+    local f = 52 + fn.clamp(dist / 3000, 0, 1) * 30 + fn.clamp(speed / 250, 0, 1) * 20
+    if air then f = f + 15 end
+    f = f * (0.90 + sf * 0.20)
+    if lethal then f = f * 0.93 end
+    return fn.clamp(f * fn.get(m.rage.spread_strength, 100) * 0.01, 0, 95)
 end
 
 function fn.dt_shift()
@@ -1938,7 +1957,8 @@ function fn.adaptive_hitscale(me, w, prof, dist, self_air)
     if pd and pd.tele then hc = hc + 8 end
     local hp = e_prop(tgt, "m_iHealth") or 100
     local lethal = prof.dmg ~= nil or (hp > 0 and hp <= 40)
-    hc = m_max(hc, fn.spread_floor(dist, mg.lp.speedxy, self_air, prof.sf, lethal))
+    -- spread floor is applied globally in rage_flush so it also covers the case
+    -- where adaptive hitscale is off
     HS.req.mp = mp
     fn.hc_request(fn.clamp(m_floor(hc), 0, 100), 1)
     if fn.get(m.rage.hs_dmg) and not (ref.mindmg_override[2] and fn.hotkey_active(ref.mindmg_override[2])) then
@@ -2059,6 +2079,13 @@ function fn.hitscale_tick()
         local tx, ty, tz
         if pd and pd.prx ~= 0 then tx, ty, tz = pd.prx, pd.pry, pd.prz else tx, ty, tz = e_origin(tgt) end
         if ex and tx then local dx, dy, dz = tx - ex, ty - ey, tz - ez; dist = m_sqrt(dx * dx + dy * dy + dz * dz) end
+    end
+    -- spread floor runs whether or not adaptive hitscale is on: a shot the cone
+    -- decides is a coin flip should be gated either way
+    if tgt and e_alive(tgt) then
+        local hp = e_prop(tgt, "m_iHealth") or 100
+        local lethal = (hp > 0 and hp <= 40) or (prof.dmg ~= nil and prof.dmg >= hp)
+        HS.req.hc_floor = fn.spread_floor(dist, mg.lp.speedxy, self_air, prof.sf, lethal)
     end
     fn.adaptive_hitscale(me, w, prof, dist, self_air)
     fn.adaptive_dthc(me, w, prof, dist, self_air)
