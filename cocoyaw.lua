@@ -343,13 +343,23 @@ local tabs = {"Home", "Anti-Aims", "Ragebot", "Utils", "Visuals"}
 local conditions = {"Shared", "Standing", "Running", "Walking", "Aerobic", "Aerobic+", "Ducking", "Sneaking"}
 local CIDX = {Shared = 1, Standing = 2, Running = 3, Walking = 4, Aerobic = 5, ["Aerobic+"] = 6, Ducking = 7, Sneaking = 8}
 
-function fn.cb(name, ...) return ui.new_combobox(TAB, CONT, name, ...) end
-function fn.ck(name) return ui.new_checkbox(TAB, CONT, name) end
-function fn.sl(name, ...) return ui.new_slider(TAB, CONT, name, ...) end
-function fn.ms(name, ...) return ui.new_multiselect(TAB, CONT, name, ...) end
-function fn.hk(name, inline) return ui.new_hotkey(TAB, CONT, name, inline) end
-function fn.bt(name, fn) return ui.new_button(TAB, CONT, name, fn) end
-function fn.lb(name) return ui.new_label(TAB, CONT, name) end
+-- display name: strip the "CY " tag, sentence-case (first upper, rest lower),
+-- wrap in <--...-->. Kept as a plain local so fn.bt's callback param can't
+-- shadow the fn table when this is called.
+local function menu_name(raw)
+    if type(raw) ~= "string" or raw:sub(1, 3) ~= "CY " then return raw end
+    local s = raw:sub(4)
+    if #s == 0 then return raw end
+    return "<--" .. s:sub(1, 1):upper() .. s:sub(2):lower() .. "-->"
+end
+
+function fn.cb(name, ...) return ui.new_combobox(TAB, CONT, menu_name(name), ...) end
+function fn.ck(name) return ui.new_checkbox(TAB, CONT, menu_name(name)) end
+function fn.sl(name, ...) return ui.new_slider(TAB, CONT, menu_name(name), ...) end
+function fn.ms(name, ...) return ui.new_multiselect(TAB, CONT, menu_name(name), ...) end
+function fn.hk(name, inline) return ui.new_hotkey(TAB, CONT, menu_name(name), inline) end
+function fn.bt(name, cbfn) return ui.new_button(TAB, CONT, menu_name(name), cbfn) end
+function fn.lb(name) return ui.new_label(TAB, CONT, menu_name(name)) end
 
 local ui_tab = fn.cb("CocoYaw", tabs)
 local ui_sub = fn.cb("AA Page", "Builder", "Misc")
@@ -519,7 +529,7 @@ m.utils = {
 -- Visuals
 m.vis = {
     indicators = fn.ck("CY Crosshair Indicators"),
-    ind_color = ui.new_color_picker(TAB, CONT, "CY Indicator Color", 250, 200, 140, 255),
+    ind_color = ui.new_color_picker(TAB, CONT, menu_name("CY Indicator Color"), 250, 200, 140, 255),
     ind_elements = fn.ms("CY Indicator Elements", "Branch", "State", "Desync Side", "Hotkeys"),
     ind_gradient = fn.ck("CY Indicator Gradient"),
     arrows = fn.ck("CY Manual Arrows"),
@@ -537,7 +547,7 @@ m.vis = {
     watermark = fn.ck("CY Watermark"),
     watermark_type = fn.cb("CY Watermark Type", "Modern", "Minimalistic", "Supremacy"),
     watermark_pos = fn.cb("CY Watermark Position", "Bottom", "Left", "Right"),
-    watermark_color = ui.new_color_picker(TAB, CONT, "CY Watermark Color", 250, 200, 140, 255),
+    watermark_color = ui.new_color_picker(TAB, CONT, menu_name("CY Watermark Color"), 250, 200, 140, 255),
 }
 
 -- config listbox + buttons
@@ -548,8 +558,8 @@ local config_data = (database and json.parse(database.read(CONFIG_KEY))) or defa
 if type(config_data) ~= "table" or type(config_data.n) ~= "table" then config_data = default_config end
 
 m.cfg = {
-    list = ui.new_listbox(TAB, CONT, "CY Config List", config_data.n),
-    name = ui.new_textbox(TAB, CONT, "CY Config Name"),
+    list = ui.new_listbox(TAB, CONT, menu_name("CY Config List"), config_data.n),
+    name = ui.new_textbox(TAB, CONT, menu_name("CY Config Name")),
 }
 
 -- defaults on

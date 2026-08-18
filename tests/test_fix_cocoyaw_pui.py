@@ -153,6 +153,16 @@ if luaUi.ragebot.auto_hide_shots:get() then fn.auto_osaa(cmd) end
         self.assertIn("fn.vis(ui_sub, false)", head)
         self.assertIn("fn.vis(ui_state, false)", head)
 
+    def test_menu_names_formatted_not_raw_cy_prefix(self):
+        # display names go through menu_name, which strips "CY ", sentence-cases,
+        # and wraps in <--...-->. No control name should reach ui.new_* as a bare
+        # "CY ..." literal.
+        source = (ROOT / "cocoyaw.lua").read_text(encoding="utf-8")
+        self.assertIn("local function menu_name(raw)", source)
+        self.assertIn('"<--" .. s:sub(1, 1):upper() .. s:sub(2):lower() .. "-->"', source)
+        bare = re.findall(r'ui\.new_\w+\(TAB, CONT, "CY ', source)
+        self.assertEqual(bare, [], "raw CY-prefixed name passed to ui.new_* without menu_name")
+
     def test_config_buttons_included_in_items_snapshot(self):
         # config buttons are created after the first ITEMS snapshot; ITEMS must be
         # rebuilt afterwards or they never get hidden and leak onto every tab.
