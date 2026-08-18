@@ -153,12 +153,15 @@ if luaUi.ragebot.auto_hide_shots:get() then fn.auto_osaa(cmd) end
         self.assertIn("fn.vis(ui_sub, false)", head)
         self.assertIn("fn.vis(ui_state, false)", head)
 
-    def test_icon_tab_bar_present(self):
+    def test_no_unsafe_floating_tab_overlay(self):
+        # a floating overlay drawn outside the menu leaks onto every gamesense
+        # tab and can pass clicks through to the game (accidental fire). Tab
+        # selection must stay inside the menu via the combobox.
         source = (ROOT / "cocoyaw.lua").read_text(encoding="utf-8")
-        self.assertIn("function fn.draw_tab_icons", source)
-        self.assertIn("renderer.load_svg", source)
-        # five icons, one per tab
-        self.assertEqual(source.count("<svg xmlns="), 5)
+        self.assertNotIn("draw_tab_icons", source)
+        self.assertNotIn("renderer.load_svg", source)
+        self.assertNotIn("client.key_state", source)
+        self.assertIn("fn.vis(ui_tab, true)", source)
 
     def test_stays_under_luajit_local_limit(self):
         # LuaJIT caps a function scope at 200 locals; the chunk body is one scope.

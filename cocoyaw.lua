@@ -569,83 +569,6 @@ function fn.all_items()
 end
 local ITEMS = fn.all_items()
 
--- ═══════════════════════════════════════════════════════════════════════════
---  Icon tab bar - replaces the tab combobox with a clickable strip of icons
---  drawn beside the gamesense menu. Falls back to the combobox if SVG textures
---  fail to load. Icons are white-filled so renderer.texture can tint them.
--- ═══════════════════════════════════════════════════════════════════════════
-local ICON_SVG = {
-    -- Home: house
-    [[<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='#fff' d='M12 3 2 12h3v8h6v-5h2v5h6v-8h3z'/></svg>]],
-    -- Anti-Aims: figure holding a scout aimed down
-    [[<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='9' cy='4' r='2.4' fill='#fff'/><path fill='#fff' d='M7.3 8h3.4l1.3 6h-2l-.6-3.2-.6 3.2H6z'/><path fill='#fff' d='M12.2 8.6 20 18.4l-1.6 1.3-7.8-9.8z'/><rect x='18.4' y='17.6' width='3.2' height='1.8' transform='rotate(51 20 18.5)' fill='#fff'/></svg>]],
-    -- Ragebot: target reticle
-    [[<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='8' fill='none' stroke='#fff' stroke-width='2'/><circle cx='12' cy='12' r='2.2' fill='#fff'/><path stroke='#fff' stroke-width='2' d='M12 1v4M12 19v4M1 12h4M19 12h4'/></svg>]],
-    -- Utils: sliders
-    [[<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='#fff' d='M3 6h11v2H3zM16 5h5v4h-5zM3 11h5v2H3zM10 10h11v4H10zM3 16h11v2H3zM16 15h5v4h-5z'/></svg>]],
-    -- Visuals: eye
-    [[<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='#fff' d='M12 5C5.5 5 1.5 12 1.5 12S5.5 19 12 19s10.5-7 10.5-7S18.5 5 12 5zm0 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8z'/><circle cx='12' cy='12' r='2' fill='#fff'/></svg>]],
-}
-local ICONS = {ok = false, tried = false, tex = {}, prev_down = false}
-
-function fn.ensure_icons()
-    if ICONS.tried then return end
-    ICONS.tried = true
-    local ok = true
-    for i = 1, #ICON_SVG do
-        local tex
-        pcall(function() tex = renderer.load_svg(ICON_SVG[i], 28, 28) end)
-        ICONS.tex[i] = tex
-        if not tex then ok = false end
-    end
-    ICONS.ok = ok
-    if ok then fn.vis(ui_tab, false); fn.refresh_menu() end
-end
-
-local ICON_STEP, ICON_CELL, ICON_SIZE = 46, 40, 26
-function fn.draw_tab_icons()
-    fn.ensure_icons()
-    if not ICONS.ok then return end
-    local mx, my = ui.menu_position()
-    local mw, mh = ui.menu_size()
-    if not mx then return end
-    local count = #tabs
-    local total = count * ICON_STEP
-    local sw = select(1, client.screen_size())
-    -- dock to the left of the menu; if the menu hugs the screen edge, dock right
-    local x = mx - (ICON_CELL + 12)
-    if x < 4 then x = mx + (mw or 0) + 12 end
-    if x + ICON_CELL > sw - 2 then x = sw - ICON_CELL - 2 end
-    local y0 = my + m_max(12, ((mh or total) - total) * 0.5)
-    -- one background panel so the strip reads as a single dock, not loose icons
-    renderer.rectangle(x - 6, y0 - 10, ICON_CELL + 12, total + 8, 16, 16, 20, 240)
-    renderer.rectangle(x - 6, y0 - 10, ICON_CELL + 12, 2, 250, 200, 140, 90)
-    local mpx, mpy = ui.mouse_position()
-    local down = client.key_state(0x01) == true
-    local click = down and not ICONS.prev_down
-    ICONS.prev_down = down
-    local cur = fn.get(ui_tab, "Home")
-    local pad = (ICON_CELL - ICON_SIZE) * 0.5
-    for i = 1, count do
-        local tab = tabs[i]
-        local cy = y0 + (i - 1) * ICON_STEP
-        local active = cur == tab
-        local hover = mpx and mpx >= x - 4 and mpx <= x + ICON_CELL and mpy and mpy >= cy - 4 and mpy <= cy + ICON_CELL
-        if active then
-            renderer.rectangle(x - 4, cy - 4, ICON_CELL + 8, ICON_CELL + 4, 34, 30, 26, 255)
-            renderer.rectangle(x - 6, cy - 4, 3, ICON_CELL + 4, 250, 200, 140, 255)
-        elseif hover then
-            renderer.rectangle(x - 4, cy - 4, ICON_CELL + 8, ICON_CELL + 4, 255, 255, 255, 20)
-        end
-        local tex = ICONS.tex[i]
-        if tex then
-            local br = active and 250 or (hover and 220 or 150)
-            renderer.texture(tex, x + pad, cy + pad, ICON_SIZE, ICON_SIZE, br, active and 200 or br, active and 140 or br, 255)
-        end
-        if hover and click then fn.set(ui_tab, tab); fn.refresh_menu() end
-    end
-end
-
 function fn.menu_hide_builtin(value)
     fn.vis(ref.AA.enabled, value); fn.vis(ref.AA.yawbase, value); fn.vis(ref.AA.fsbodyyaw, value)
     fn.vis(ref.AA.edgeyaw, value); fn.vis(ref.AA.roll, value)
@@ -660,9 +583,9 @@ end
 
 function fn.refresh_menu()
     for i = 1, #ITEMS do fn.vis(ITEMS[i], false) end
-    -- ui_sub/ui_state are standalone controls, not part of ITEMS, so hide them
-    -- here or they leak into every tab; the tab combobox hides once icons load
-    fn.vis(ui_tab, not ICONS.ok)
+    -- ui_tab/ui_sub/ui_state are standalone controls, not part of ITEMS, so they
+    -- must be driven here or they leak into every tab
+    fn.vis(ui_tab, true)
     fn.vis(ui_sub, false)
     fn.vis(ui_state, false)
     local tab = fn.get(ui_tab, "Home")
@@ -2666,10 +2589,7 @@ client.set_event_callback("paint", function()
 end)
 
 client.set_event_callback("paint_ui", function()
-    if ui.is_menu_open() then
-        fn.menu_hide_builtin(false)
-        fn.draw_tab_icons()
-    end
+    if ui.is_menu_open() then fn.menu_hide_builtin(false) end
 end)
 
 client.set_event_callback("aim_fire", function(s)
