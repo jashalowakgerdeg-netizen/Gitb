@@ -86,6 +86,18 @@ if luaUi.ragebot.auto_hide_shots:get() then fn.auto_osaa(cmd) end
         self.assertIn("fn.auto_osaa(cmd)", patched)
         self.assertFalse(fix.validate(patched))
 
+    def test_checked_in_lua_avoids_known_pui_port_failures(self):
+        source = (ROOT / "cocoyaw.lua").read_text(encoding="utf-8")
+
+        self.assertNotIn("gamesense/pui", source)
+        self.assertNotIn("ref.os.value", source)
+        self.assertNotIn("client.latency(0)", source)
+        self.assertNotIn("return d == nil or d >= 0 and 0 or -d", source)
+        self.assertIn('"CY Hide-Shots fix"', source)
+        self.assertIn('"CY on-shot angle capture"', source)
+        self.assertIn('p_set(ent, "Force Body Yaw Value"', source)
+        self.assertIn('local tabs = {"Home", "Anti-Aims", "Ragebot", "Utils", "Visuals"}', source)
+
 
 if __name__ == "__main__":
     unittest.main()
