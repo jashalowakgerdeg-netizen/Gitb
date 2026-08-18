@@ -427,6 +427,7 @@ m.aa = {
         "Break legs", "Break move yaw", "Air desync", "Land pitch break"),
     tweak_lean = fn.sl("CY Body Lean", 0, 1000, 100, true, "%", 0.01),
     tweak_defmul = fn.sl("CY Defensive Multiplier", 100, 400, 250, true, "%", 0.01),
+    flash_raise = fn.sl("CY Flash Raise", 0, 100, 100, true, "%"),
 }
 
 -- Anti-Aims / Builder (per condition)
@@ -642,6 +643,7 @@ function fn.refresh_menu()
             fn.vis(a.tweak_opts, fn.get(a.tweak_aa))
             fn.vis(a.tweak_lean, fn.get(a.tweak_aa) and fn.contains(fn.get(a.tweak_opts, {}), "Extreme body lean"))
             fn.vis(a.tweak_defmul, fn.get(a.tweak_aa) and fn.contains(fn.get(a.tweak_opts, {}), "Defensive boost"))
+            fn.vis(a.flash_raise, fn.get(a.tweak_aa) and fn.contains(fn.get(a.tweak_opts, {}), "Fake flash"))
         else
             fn.vis(ui_state, true)
             local st = fn.get(ui_state, "Shared")
@@ -934,6 +936,7 @@ local mg = {
     shottimer = 0, shotbool = false, jumpscout = false, autopeekfix = 0, airtime = 0, groundtimer = 0,
     threat = -1, fsside = nil, fsyaw = nil, atyaw = nil, hittable_any = false,
     indefensive = false, ext_fired = false, lc_broken = false, head_peek = 0, last_sent = true,
+    flash_active = false, flash_side = 1,
     tb = {cmd = nil, max = nil, diff = nil, depth = 0}, own_desync = 0, own_max = 58, fl_phase = 0,
     fs = {
         left = {t1 = {startpos = vector(), endpos = vector(), fraction = 1, hit = -1}, t2 = {startpos = vector(), endpos = vector(), fraction = 1, hit = -1}},
@@ -1688,6 +1691,27 @@ function fn.setup_aa(cmd)
 
     if fn.get(A.fs_bodyyaw) then fn.ovr(ref.AA.fsbodyyaw, true) else fn.ovr(ref.AA.fsbodyyaw, false) end
 
+    -- Fake flash exploit - server-side portion.
+    --
+    -- What the server actually reads of us is the goal feet yaw, which it clamps
+    -- to the animstate max yaw. This forces the body yaw to that ceiling on the
+    -- fake (choked) packet on the desync side, so the separation the server holds
+    -- is the maximum it will allow - the fake yaw "raised to the top". This is
+    -- the real lever; the matching overlay/lean/pose in break_anims is held so an
+    -- enemy resolver sampling the networked layers/pose agrees with this side.
+    mg.flash_active = false
+    if fn.get(m.aa.tweak_aa) and fn.contains(fn.get(m.aa.tweak_opts, {}), "Fake flash") and not in_def then
+        local side = (mg.head_peek ~= 0 and mg.head_peek) or (aam.desyncswitch and 1 or -1)
+        mg.flash_side = side
+        if not cmd.allow_send_packet then
+            -- request the ceiling; the engine clamps 90 down to the real max yaw,
+            -- so this always lands at the maximum server-allowed desync
+            fn.ovr(ref.AA.bodyyaw[1], "Static")
+            fn.ovr(ref.AA.bodyyaw[2], side * 90)
+            mg.flash_active = true
+        end
+    end
+
     -- extended defensive
     local want_ext = fn.get(m.aa.ext_def) or (fn.get(m.aa.ext_def_hit) and mg.hittable_any)
     if mg.tb.diff == nil or mg.tb.diff >= 0 then mg.ext_fired = false end
@@ -2243,12 +2267,16 @@ function fn.break_anims()
     -- then reads a body that disagrees with the goal feet yaw the server is
     -- actually holding, and it flips with the fake side instead of sitting still.
     if fn.contains(o, "Fake flash") then
+        -- side taken from the real desync the server is holding this tick, so the
+        -- pose/overlay never disagree with the goal feet yaw that was clamped in
+        -- setup_aa; falls back to the requested flash side before the first read
+        local dpose = fn.pose_body(me) or 0
+        local side = dpose ~= 0 and (dpose > 0 and 1 or -1) or (mg.flash_side or 1)
+        -- carry the break on choked commands only; the sent packet keeps clean
+        -- layers so our own real angle is never animated against
+        local w = mg.last_sent and 0 or 1
         local l9 = fn.layerbase(me, 9)
         if l9 then
-            local side = (mg.head_peek ~= 0 and mg.head_peek) or (aam.desyncswitch and 1 or -1)
-            -- only carry the break on choked commands; the sent packet keeps a
-            -- clean layer so our own real angle is never animated against
-            local w = mg.last_sent and 0 or 1
             pcall(fn.ALIS, l9, AL.SEQUENCE, 224)
             pcall(fn.ALFS, l9, AL.WEIGHT, w)
             pcall(fn.ALFS, l9, AL.WEIGHT_RATE, 0)
@@ -2256,14 +2284,22 @@ function fn.break_anims()
             local cyc = side > 0 and 0.0 or 0.5
             pcall(fn.ALFS, l9, AL.CYCLE, cyc)
             pcall(fn.ALFS, l9, AL.PREV_CYCLE, cyc)
-            if w > 0 then
-                -- the adjust layer is what ties the upper body to the aim matrix;
-                -- collapsing it while flashed is what makes the break hold
-                local l3 = fn.layerbase(me, 3)
-                if l3 then pcall(fn.ALFS, l3, AL.WEIGHT, 0); pcall(fn.ALFS, l3, AL.WEIGHT_RATE, 0) end
-            end
-            fn.anim_rebuild(ast)
         end
+        if w > 0 then
+            -- adjust layer ties the upper body to the aim matrix; collapsing it
+            -- while flashed lets the break hold instead of snapping back to aim
+            local l3 = fn.layerbase(me, 3)
+            if l3 then pcall(fn.ALFS, l3, AL.WEIGHT, 0); pcall(fn.ALFS, l3, AL.WEIGHT_RATE, 0) end
+            -- pose parameters ARE networked, so these reach other clients' resolve:
+            -- lean yaw carries the desync side and body pitch raises the torso,
+            -- which is the "flash up" the fake yaw produces
+            local raise = fn.get(m.aa.flash_raise, 100) * 0.01
+            sp(me, "m_flPoseParameter", side > 0 and 1 or 0, PZ.LEAN_YAW)
+            sp(me, "m_flPoseParameter", fn.clamp(0.5 + 0.5 * raise, 0, 1), PZ.BODY_PITCH)
+            local l12 = fn.layerbase(me, 12)
+            if l12 then pcall(fn.ALFS, l12, AL.WEIGHT, fn.clamp(raise, 0, 1)); pcall(fn.ALFS, l12, AL.WEIGHT_RATE, 0) end
+        end
+        fn.anim_rebuild(ast)
     end
     if fn.contains(o, "Moonwalk") then sp(me, "m_flPoseParameter", 0, PZ.MOVE_YAW) end
     if fn.contains(o, "Smoothing") then sp(me, "m_flPoseParameter", 0, PZ.LEAN_YAW) end

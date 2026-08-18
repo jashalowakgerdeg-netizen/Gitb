@@ -166,7 +166,21 @@ if luaUi.ragebot.auto_hide_shots:get() then fn.auto_osaa(cmd) end
         flash = flash[:flash.index("fn.anim_rebuild(ast)")]
         self.assertIn("AL.WEIGHT_RATE, 0", flash)
         self.assertIn("mg.last_sent", flash)
-        self.assertIn("aam.desyncswitch", flash)
+        # phase-locked to the real desync side the server is holding
+        self.assertIn("fn.pose_body(me)", flash)
+        self.assertIn("PZ.LEAN_YAW", flash)
+        self.assertIn("PZ.BODY_PITCH", flash)
+
+    def test_fake_flash_server_side_body_yaw(self):
+        # the genuinely server-authoritative lever: on the fake packet the body
+        # yaw is driven to the engine ceiling on the desync side.
+        source = (ROOT / "cocoyaw.lua").read_text(encoding="utf-8")
+        self.assertIn("mg.flash_active = false", source)
+        hook = source[source.index("Fake flash exploit - server-side portion."):]
+        hook = hook[:hook.index("-- extended defensive")]
+        self.assertIn('fn.ovr(ref.AA.bodyyaw[1], "Static")', hook)
+        self.assertIn("fn.ovr(ref.AA.bodyyaw[2], side * 90)", hook)
+        self.assertIn("not cmd.allow_send_packet", hook)
 
     def test_menu_names_formatted_not_raw_cy_prefix(self):
         # display names go through menu_name, which strips "CY ", sentence-cases,
